@@ -397,7 +397,7 @@ class TFStaticEnerFitting(EnerFitting):
 class PaddleEleNet(paddle.nn.Layer):
     def __init__(self, n_in, n_hidden, activation_fn=paddle.tanh,
                  precision=GLOBAL_PADDLE_FLOAT_PRECISION, trainable=True,
-                 use_resnet=False, use_timestep=1.,
+                 use_resnet=False, res_timestep=1.,
                  drop=False, p=0.5,
                  ):
         super().__init__()
@@ -408,7 +408,7 @@ class PaddleEleNet(paddle.nn.Layer):
         self.dropout = paddle.nn.Dropout(p=p) if drop else None
         self.activation_fn = activation_fn
         self.use_resnet = use_resnet
-        self.use_timestep = use_timestep
+        self.res_timestep = res_timestep
 
     def forward(self, inputs):
         f = self.get_latent_variables(inputs)
@@ -420,7 +420,7 @@ class PaddleEleNet(paddle.nn.Layer):
         if self.dropout is not None:
             f = self.dropout(f)
         if self.use_resnet:
-            f += self.activation_fn(f) * self.use_timestep
+            f += self.activation_fn(f) * self.res_timestep
         else:
             f = self.activation_fn(f)
         for layer in self.layers:
@@ -428,7 +428,7 @@ class PaddleEleNet(paddle.nn.Layer):
             if self.dropout is not None:
                 f = self.dropout(f)
             if self.use_resnet:
-                f += self.activation_fn(f) * self.use_timestep
+                f += self.activation_fn(f) * self.res_timestep
             else:
                 f = self.activation_fn(f)
         return f
@@ -451,13 +451,36 @@ class PaddleDynamicEnerFitting(EnerFitting, paddle.nn.Layer):
         # "gelu": gelu,
     }
 
-    def __init__(self, *args, **kwargs):
-        EnerFitting.__init__(self, *args, **kwargs)
+    def __init__ (self, 
+                  descrpt : DescrptClass,
+                  neuron : List[int] = [120,120,120],
+                  resnet_dt : bool = True,
+                  use_resnet: bool = True,
+                  res_timestep : float = 1.,
+                  numb_fparam : int = 0,
+                  numb_aparam : int = 0,
+                  rcond : float = 1e-3,
+                  tot_ener_zero : bool = False,
+                  trainable : List[bool] = None,
+                  seed : int = 1,
+                  atom_ener : List[float] = [],
+                  activation_function : str = 'tanh',
+                  precision : str = 'default'
+    ) -> None:
+                  
+        EnerFitting.__init__(self, descrpt, neuron, resnet_dt, 
+                             numb_fparam, numb_aparam,
+                             rcond, tot_ener_zero, trainable, seed, atom_ener,
+                             activation_function, precision)
         paddle.nn.Layer.__init__(self)
+        self.use_resnet = use_resnet
+        self.res_timestep = res_timestep
         self.elements_nets = paddle.nn.LayerList(
             [PaddleEleNet(n_in=self.dim_descrpt + self.numb_fparam + self.numb_aparam,
                           n_hidden=self.n_neuron,
-                          activation_fn=self.fitting_activation_fn)
+                          activation_fn=self.fitting_activation_fn,
+                          use_resnet=self.use_resnet, res_timestep = self.res_timestep,
+                          )
              for _ in range(self.ntypes)])
 
     def set_atom_ener(self, atom_ener):
@@ -504,7 +527,7 @@ class PaddleDynamicEnerFitting(EnerFitting, paddle.nn.Layer):
                 ext_fparam = paddle.tile(fparam, [1, natoms[2 + type_i]])
                 ext_fparam = paddle.reshape(ext_fparam, [-1, self.numb_fparam])
                 ext_fparam = paddle.cast(ext_fparam, self.fitting_precision)
-                layer = tf.concat([layer, ext_fparam], axis=1)
+                layer = paddle.concat([layer, ext_fparam], axis=1)
             if self.numb_aparam > 0:
                 ext_aparam = paddle.slice(aparam, [1]
                                           [start_index * self.numb_aparam],
